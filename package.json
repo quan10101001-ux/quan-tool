@@ -1,0 +1,6 @@
+{
+  "name": "redis-tunnel",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
