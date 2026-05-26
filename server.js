@@ -1,58 +1,34 @@
 const net = require('net');
 
-const TUNNEL_PORT = 7000;
-const PUBLIC_PORT = 6379;
+const VPS_HOST = 'quan-tool-production.up.railway.app';
+const VPS_TUNNEL_PORT = 7000;
+const REDIS_PORT = parseInt(process.argv[2]) || 6379;
 
-const tunnelQueue = [];
-const clientQueue = [];
+console.log(`[info] Redis local port: ${REDIS_PORT}`);
+console.log(`[info] Tunnel server: ${VPS_HOST}:${VPS_TUNNEL_PORT}`);
 
-function tryPair() {
-  while (tunnelQueue.length && clientQueue.length) {
-    const tunnel = tunnelQueue.shift();
-    const client = clientQueue.shift();
+function connect() {
+  console.log('[client] Connecting to VPS...');
 
-    tunnel.pipe(client);
-    client.pipe(tunnel);
+  const tunnel = net.connect(VPS_TUNNEL_PORT, VPS_HOST);
+  const local = net.connect(REDIS_PORT, '127.0.0.1');
 
-    tunnel.on('error', () => client.destroy());
-    client.on('error', () => tunnel.destroy());
-    tunnel.on('close', () => client.destroy());
-    client.on('close', () => tunnel.destroy());
+  tunnel.pipe(local);
+  local.pipe(tunnel);
 
-    console.log('[pair] Paired tunnel with client');
-  }
+  tunnel.on('connect', () => console.log('[client] Tunnel established — ready'));
+
+  const cleanup = () => {
+    tunnel.destroy();
+    local.destroy();
+    console.log('[client] Disconnected, reconnecting in 3s...');
+    setTimeout(connect, 3000);
+  };
+
+  tunnel.on('error', cleanup);
+  tunnel.on('close', cleanup);
+  local.on('error', () => tunnel.destroy());
+  local.on('close', () => tunnel.destroy());
 }
 
-net.createServer(sock => {
-  console.log('[tunnel] New tunnel slot ready');
-  tunnelQueue.push(sock);
-
-  sock.on('close', () => {
-    const i = tunnelQueue.indexOf(sock);
-    if (i !== -1) tunnelQueue.splice(i, 1);
-  });
-
-  sock.on('error', () => {
-    const i = tunnelQueue.indexOf(sock);
-    if (i !== -1) tunnelQueue.splice(i, 1);
-  });
-
-  tryPair();
-}).listen(TUNNEL_PORT, () => console.log(`[tunnel] Waiting on port ${TUNNEL_PORT}`));
-
-net.createServer(sock => {
-  console.log('[public] Client connected');
-  clientQueue.push(sock);
-
-  sock.on('close', () => {
-    const i = clientQueue.indexOf(sock);
-    if (i !== -1) clientQueue.splice(i, 1);
-  });
-
-  sock.on('error', () => {
-    const i = clientQueue.indexOf(sock);
-    if (i !== -1) clientQueue.splice(i, 1);
-  });
-
-  tryPair();
-}).listen(PUBLIC_PORT, () => console.log(`[public] Redis available on port ${PUBLIC_PORT}`));
+connect();
